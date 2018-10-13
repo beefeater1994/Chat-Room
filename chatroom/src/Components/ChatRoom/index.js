@@ -7,8 +7,8 @@ import io from "socket.io-client";
 import List from "semantic-ui-react/dist/commonjs/elements/List/List";
 import Segment from "semantic-ui-react/dist/commonjs/elements/Segment/Segment";
 import ReactList from 'react-list';
-
-
+import { ToastContainer, toast } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 
 class Chat extends React.Component{
     constructor(props) {
@@ -23,30 +23,72 @@ class Chat extends React.Component{
         this.socket = io.connect('http://localhost');
     }
 
+    alertNotify = (message) => {
+        toast.warn(message, {
+            position: "top-right",
+            autoClose: 3500,
+            hideProgressBar: false,
+            closeOnClick: true,
+            pauseOnHover: true,
+            draggable: true,
+        });
+    };
+
+    // Notify your own operations
+    notify = (message) => {
+        toast.success(message, {
+            position: "top-right",
+            autoClose: 3500,
+            hideProgressBar: false,
+            closeOnClick: true,
+            pauseOnHover: true,
+            draggable: true,
+        });
+    };
+
+    // Notify other people's operations
+    otherNotify = (message) => {
+        toast(message, {
+            position: "top-right",
+            autoClose: 3500,
+            hideProgressBar: false,
+            closeOnClick: true,
+            pauseOnHover: true,
+            draggable: true,
+        });
+    };
     componentDidMount() {
         this.socket.emit("LOGIN");
         this.socket.on("LOGIN_SUCCESS", res => {
             this.setState({
                 currentUser: res.user,
+                currentRoom: "Lobby1",
                 rooms: res.rooms,
                 room: res.room
             });
-            alert(`${res.user} you logged  in!`);
+            this.notify(`🦄 You are ${res.user}!`);
         });
-        // this.socket.on('RECEIVE_MESSAGE', function(data){
-        //     addMessage(data);
-        // });
-        // const addMessage = data => {
-        //     this.setState({messages: [...this.state.messages.filter(el => el.room === data.room), data]});
-        // };
-        //
-        // this.socket.on('ROOM_CHANGE_RECEIVE', (data) => {
-        //     let room = data.roomChangeTo;
-        //     if (!this.state.rooms.includes(room)) {
-        //         this.setState({rooms: [...this.state.rooms, room]});
-        //     }
-        //     this.setState({currentRoom: room});
-        // });
+        this.socket.on("ALERT", res => {
+            this.alertNotify(res);
+        });
+        this.socket.on("SERVER_MESSAGE", res => {
+            this.notify(res);
+        });
+        this.socket.on("SERVER_MESSAGE_OTHER'S_OPERATION", res => {
+            this.otherNotify(res);
+        });
+        this.socket.on('RECEIVE_MESSAGE', (author, message, id)=>{
+            const data = {
+                author: author,
+                message: message,
+                id: id,
+                color: author === "You" ? "red" : "blue"
+            };
+            this.setState({messages: [...this.state.messages, data]});
+        });
+        this.socket.on("UPDATE_ROOMS", (rooms) => {
+            this.setState({rooms: rooms});
+        });
     }
 
     changeHandler = (event) => {
@@ -60,13 +102,18 @@ class Chat extends React.Component{
         if (this.state.currentRoom === "" && input.split(" ")[0] !== "/join" && input.split(" ")[0] !== "/nick") {
             return alert("You have to choose a room first!");
         }
-        // If input starts with "/nick [username]", this operation just set current user
+        // If input starts with "/nick [username]", change name!
         if (input.split(" ")[0] === "/nick") {
-            this.setState({currentUser: input.split(" ").slice(1).join()});
+            let newName = input.split(" ").slice(1).join();
+            this.socket.emit("CHANGE_NAME", this.state.currentUser, newName, this.state.currentRoom);
+            this.setState({ currentUser: newName });
         } else if (input.split(" ")[0] === "/join") {
+            // If input starts with "/join [roomName]", change room!
             let roomCreated = input.split(" ").slice(1).join();
-            this.socket.emit('ROOM_CHANGE', {
-                roomChangeTo:  roomCreated
+            this.socket.emit("CHANGE_ROOM", this.state.currentRoom, roomCreated, this.state.currentUser, this.state.rooms);
+            this.setState({
+                currentRoom: roomCreated,
+                messages: []
             });
         }else {
             this.socket.emit('SEND_MESSAGE', {
@@ -82,7 +129,7 @@ class Chat extends React.Component{
         return (
             <Comment key={this.state.messages[index].id}>
                 <Comment.Content>
-                    <Comment.Author style={{ color: "blue" }}>{this.state.messages[index].author}:</Comment.Author>
+                    <Comment.Author style={{ color: this.state.messages[index].color }}>{this.state.messages[index].author}:</Comment.Author>
                     <Comment.Text>
                         {this.state.messages[index].message}
                     </Comment.Text>
@@ -101,6 +148,7 @@ class Chat extends React.Component{
                         <a className="header item">Your room is {this.state.currentRoom}</a>
                     </div>
                 </div>
+                <ToastContainer/>
                 <div className="ui grid massive message">
                     <Grid.Row style={{ height: 500 }}>
                         <Grid.Column width={13}>
@@ -112,7 +160,7 @@ class Chat extends React.Component{
                                     <div style={{overflow: 'auto', height: 400}} >
                                         <ReactList
                                             itemRenderer={this.renderItem}
-                                            initialIndex={this.state.messages.length > 5 ? this.state.messages.length - 5 : 0}
+                                            initialIndex={0}
                                             length={this.state.messages.length}
                                             type='uniform'
                                         />
